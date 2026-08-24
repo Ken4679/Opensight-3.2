@@ -6,7 +6,9 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::State;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{Manager, State, WindowEvent};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::System::JobObjects::{
@@ -133,6 +135,70 @@ fn main() {
             auth_token,
         })
         .invoke_handler(tauri::generate_handler![get_backend_port, get_auth_token])
+        .setup(|app| {
+            let show_i = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+            let hide_i = MenuItem::with_id(app, "hide", "最小化到托盘", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "退出 OpenSight", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_i, &hide_i, &quit_i])?;
+
+            let mut tray_builder = TrayIconBuilder::new()
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .tooltip("OpenSight VPN 3.1");
+
+            if let Some(icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(icon.clone());
+            }
+
+            tray_builder
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "hide" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.hide();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(app)?;
+
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                // 点击关闭时静默隐藏到托盘，保持后台守护与分流路由不中断
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用失败");
 }
