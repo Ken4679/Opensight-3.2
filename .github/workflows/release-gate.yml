@@ -37,11 +37,11 @@ jobs:
         run: |
           "C:\Program Files\Git\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # 5. 安装 Python 依赖
+      # 5. 安装 Python 依赖 (通过锁文件保证可复现)
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.lock
           pip install -r requirements-dev.txt
           pip install -e .
 
