@@ -19,6 +19,7 @@ OpenSight is a **desktop-native, local-first network routing and VPN management 
 3. **CORS & Origin Whitelisting**: Cross-Origin Resource Sharing is strictly constrained to `tauri://localhost`, `http://localhost`, `http://127.0.0.1`, and explicit header whitelists (`Authorization`, `Content-Type`, `X-Requested-With`, `Accept`).
 4. **WebView Content Security Policy (CSP)**: The Tauri WebView enforces strict script and resource execution boundaries (`object-src 'none'`, `frame-ancestors 'none'`, restricted `connect-src`).
 5. **No Telemetry / No Phoning Home**: OpenSight does not operate remote servers, tracking pixels, or third-party telemetry collectors.
+6. **/api/health Endpoint**: `/api/health` is intentionally unauthenticated and returns only minimal application status metadata (`status`, `app`, `version`) without exposing tokens, paths, credentials, or internal system configurations.
 
 ---
 

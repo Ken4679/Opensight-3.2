@@ -92,11 +92,22 @@ def package_release(output_dir: Path, commit_sha: str = "LOCAL_BUILD") -> Path:
         if not c_path.is_file():
             raise RuntimeError(f"发布清单缺少文件: {c_path}")
         c_actual = hashlib.sha256(c_path.read_bytes()).hexdigest().lower()
-        # 对于外部固化组件，必须与预设官方 hash 严格比对；自构建产物则记录构建时哈希
-        expected_sha = c_expected.lower() if c_expected else c_actual
-        if c_expected and c_actual != expected_sha:
-            raise RuntimeError(f"组件 {c_name} 哈希与官方固化基准不符: 预期 {expected_sha}, 实际 {c_actual}")
         
+        if c_owned:
+            # OpenSight 自己构建的二进制：不伪造外部预期哈希，明确标为 BUILT_ARTIFACT
+            status = VerificationStatus.BUILT_ARTIFACT
+            expected_sha = None
+        elif c_expected:
+            # 外部第三方固化组件：必须与预设官方 hash 严格比对
+            expected_sha = c_expected.lower()
+            if c_actual != expected_sha:
+                raise RuntimeError(f"组件 {c_name} 哈希与官方固化基准不符: 预期 {expected_sha}, 实际 {c_actual}")
+            status = VerificationStatus.VERIFIED
+        else:
+            # 由已验证安装包/ZIP提取出的运行组件
+            expected_sha = None
+            status = VerificationStatus.VERIFIED
+
         rel_path = str(c_path.relative_to(staging_dir)).replace("\\", "/")
         artifacts.append(ArtifactProvenance(
             artifact_name=c_name,
@@ -105,7 +116,7 @@ def package_release(output_dir: Path, commit_sha: str = "LOCAL_BUILD") -> Path:
             source_domain=c_domain,
             expected_sha256=expected_sha,
             actual_sha256=c_actual,
-            verification_status=VerificationStatus.VERIFIED,
+            verification_status=status,
             file_size_bytes=c_path.stat().st_size,
             local_path=rel_path,
             downloaded_at=int(time.time()),
