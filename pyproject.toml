@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "opensight"
-version = "3.1.0"
+version = "3.2.0"
 description = "Security-first, local-first OpenVPN node measurement and management utility."
 readme = "README.md"
 requires-python = ">=3.10"
