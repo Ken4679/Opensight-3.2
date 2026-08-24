@@ -292,16 +292,26 @@ wss.on('connection', (ws) => {
 });
 
 // Periodic traffic generator when connected
+let lastBytesIn = 1024 * 1024 * 142;
+let lastBytesOut = 1024 * 1024 * 38;
+let currentUploadSpeed = 0;
+let currentDownloadSpeed = 0;
+
 setInterval(() => {
   if (vpnState.isConnected) {
-    const uploadSpeedBps = Math.floor(Math.random() * 450000) + 120000;
-    const downloadSpeedBps = Math.floor(Math.random() * 4500000) + 1800000;
+    currentUploadSpeed = Math.floor(Math.random() * 450000) + 120000;
+    currentDownloadSpeed = Math.floor(Math.random() * 4500000) + 1800000;
+    lastBytesIn += currentDownloadSpeed;
+    lastBytesOut += currentUploadSpeed;
     broadcast("traffic_data", {
-      uploadSpeedBps,
-      downloadSpeedBps,
-      bytesIn: 1024 * 1024 * 142,
-      bytesOut: 1024 * 1024 * 38
+      uploadSpeedBps: currentUploadSpeed,
+      downloadSpeedBps: currentDownloadSpeed,
+      bytesIn: lastBytesIn,
+      bytesOut: lastBytesOut
     });
+  } else {
+    currentUploadSpeed = 0;
+    currentDownloadSpeed = 0;
   }
 }, 1000);
 
@@ -339,21 +349,21 @@ app.post('/api/nodes/import', (req, res) => {
 
 app.post('/api/nodes/open-folder', (req, res) => {
   systemLogs.push(`[UI] 打开本地配置文件夹目录`);
-  res.json({ success: true });
+  res.json({ ok: true, success: true });
 });
 
-app.post('/api/nodes/probe', (req, res) => {
-  res.json({ status: "probing_started" });
+let probeTimer: NodeJS.Timeout | null = null;
 
+function runMockProbe() {
+  if (probeTimer) clearInterval(probeTimer);
   let completed = 0;
   const total = mockNodes.length;
 
-  const timer = setInterval(() => {
+  probeTimer = setInterval(() => {
     completed++;
     const node = mockNodes[completed - 1];
     const percentage = Math.round((completed / total) * 100);
 
-    // Randomize latency slightly
     if (node) {
       const jitter = Math.floor(Math.random() * 6) - 3;
       if (node.bestTcpLatency) {
@@ -371,20 +381,51 @@ app.post('/api/nodes/probe', (req, res) => {
     });
 
     if (completed >= total) {
-      clearInterval(timer);
-      broadcast("probe_finished", { total, success: total });
+      if (probeTimer) clearInterval(probeTimer);
+      probeTimer = null;
+      broadcast("probe_finished", { total, success: total, stopped: false });
       systemLogs.push(`[PROBE] 全量测速完成，所有 ${total} 个节点均通过健康检测`);
     }
   }, 400);
+}
+
+app.post('/api/probe/start', (req, res) => {
+  runMockProbe();
+  res.json({ status: "started" });
+});
+
+app.post('/api/probe/stop', (req, res) => {
+  if (probeTimer) {
+    clearInterval(probeTimer);
+    probeTimer = null;
+    broadcast("probe_finished", { stopped: true });
+    systemLogs.push(`[PROBE] 测速已由用户手动停止`);
+  }
+  res.json({ status: "stopping" });
+});
+
+app.post('/api/nodes/probe', (req, res) => {
+  runMockProbe();
+  res.json({ status: "probing_started" });
 });
 
 app.get('/api/vpn/status', (req, res) => {
   res.json(vpnState);
 });
 
+app.get('/api/vpn/traffic', (req, res) => {
+  res.json({
+    uploadSpeedBps: currentUploadSpeed,
+    downloadSpeedBps: currentDownloadSpeed,
+    bytesIn: lastBytesIn,
+    bytesOut: lastBytesOut
+  });
+});
+
 app.post('/api/vpn/connect', (req, res) => {
-  const { nodeId, mode } = req.body;
-  const targetNode = mockNodes.find(n => n.nodeId === nodeId) || mockNodes[0];
+  const { nodeId, node_id, mode } = req.body;
+  const targetId = nodeId || node_id;
+  const targetNode = mockNodes.find(n => n.nodeId === targetId) || mockNodes[0];
 
   vpnState.connectedNodeId = targetNode.nodeId;
   vpnState.mode = mode || "split";
@@ -417,11 +458,10 @@ app.post('/api/vpn/connect', (req, res) => {
     }
   }, 1200);
 
-  res.json({ success: true, message: "Connecting" });
+  res.json({ success: true, status: "connecting", message: "Connecting" });
 });
 
 app.post('/api/vpn/disconnect', (req, res) => {
-  const prevNode = vpnState.connectedNodeId;
   vpnState.isConnected = false;
   vpnState.code = "DISCONNECTED";
   vpnState.state = "未连接";
@@ -437,55 +477,119 @@ app.post('/api/vpn/disconnect', (req, res) => {
   });
 
   systemLogs.push(`[VPN] OpenVPN 隧道已安全关闭，释放虚拟适配器与路由表`);
-  res.json({ success: true, message: "Disconnected" });
+  res.json({ success: true, status: "disconnecting", message: "Disconnected" });
 });
 
-app.get('/api/vpn/credentials', (req, res) => {
+// Credentials endpoints (support both /api/credentials and /api/vpn/credentials)
+const handleGetCreds = (req: express.Request, res: express.Response) => {
   res.json({
     hasCredentials: mockCredentials.hasCredentials,
     username: mockCredentials.username
   });
-});
+};
 
-app.post('/api/vpn/credentials', (req, res) => {
+const handleSaveCreds = (req: express.Request, res: express.Response) => {
   const { username, password } = req.body;
   mockCredentials.hasCredentials = true;
-  mockCredentials.username = username;
-  mockCredentials.password = password;
+  mockCredentials.username = username || "";
+  mockCredentials.password = password || "";
   vpnState.hasCredentials = true;
-  systemLogs.push(`[AUTH] ProtonVPN 账户凭据已更新并加密存储`);
-  res.json({ success: true });
-});
+  systemLogs.push(`[AUTH] VPN 账户凭据已更新并加密存储 (Windows DPAPI)`);
+  res.json({ ok: true, success: true });
+};
 
-app.delete('/api/vpn/credentials', (req, res) => {
+const handleClearCreds = (req: express.Request, res: express.Response) => {
   mockCredentials.hasCredentials = false;
   mockCredentials.username = "";
   mockCredentials.password = "";
   vpnState.hasCredentials = false;
   systemLogs.push(`[AUTH] 凭据已从安全存储区清除`);
-  res.json({ success: true });
-});
+  res.json({ ok: true, success: true });
+};
 
+app.get('/api/credentials', handleGetCreds);
+app.post('/api/credentials', handleSaveCreds);
+app.delete('/api/credentials', handleClearCreds);
+
+app.get('/api/vpn/credentials', handleGetCreds);
+app.post('/api/vpn/credentials', handleSaveCreds);
+app.delete('/api/vpn/credentials', handleClearCreds);
+
+// Routing rules endpoints
 app.get('/api/routing/rules', (req, res) => {
   res.json(routingRules);
 });
 
+app.get('/api/routing/installed-apps', (req, res) => {
+  res.json(installedApps);
+});
+app.get('/api/routing/apps', (req, res) => {
+  res.json(installedApps);
+});
+
+app.post('/api/routing/rule', (req, res) => {
+  const { executable_path, app_name, action, enabled } = req.body;
+  const path = executable_path;
+  const name = app_name;
+  const existingIdx = routingRules.findIndex(r => r.executablePath.toLowerCase() === (path || '').toLowerCase());
+  
+  if (existingIdx >= 0) {
+    routingRules[existingIdx] = {
+      ...routingRules[existingIdx],
+      appName: name || routingRules[existingIdx].appName,
+      action: action || routingRules[existingIdx].action,
+      isEnabled: enabled !== undefined ? enabled : routingRules[existingIdx].isEnabled
+    };
+  } else {
+    routingRules.push({
+      ruleId: `r_${Date.now()}`,
+      appName: name || "未知应用",
+      executablePath: path || "",
+      action: action || "VPN",
+      isEnabled: enabled !== undefined ? enabled : true
+    });
+  }
+  systemLogs.push(`[ROUTING] 更新分流规则: ${name || path} -> ${action} (${enabled ? '启用' : '禁用'})`);
+  res.json({ ok: true });
+});
+
 app.post('/api/routing/rules', (req, res) => {
   const rule = req.body;
-  const existingIdx = routingRules.findIndex(r => r.ruleId === rule.ruleId);
+  const existingIdx = routingRules.findIndex(r => r.ruleId === rule.ruleId || r.executablePath === rule.executablePath);
   if (existingIdx >= 0) {
     routingRules[existingIdx] = rule;
   } else {
-    routingRules.push({ ...rule, ruleId: `rule-${Date.now()}` });
+    routingRules.push({ ...rule, ruleId: rule.ruleId || `rule-${Date.now()}` });
   }
   systemLogs.push(`[ROUTING] 更新分流规则: ${rule.appName} -> ${rule.action}`);
-  res.json({ success: true, rules: routingRules });
+  res.json({ ok: true, success: true, rules: routingRules });
+});
+
+app.delete('/api/routing/rule', (req, res) => {
+  const executablePath = (req.query.executable_path as string) || req.body?.executable_path;
+  if (executablePath) {
+    routingRules = routingRules.filter(r => r.executablePath.toLowerCase() !== executablePath.toLowerCase());
+    systemLogs.push(`[ROUTING] 移除分流规则: ${executablePath}`);
+  }
+  res.json({ ok: true });
 });
 
 app.delete('/api/routing/rules/:id', (req, res) => {
   routingRules = routingRules.filter(r => r.ruleId !== req.params.id);
   systemLogs.push(`[ROUTING] 删除分流规则 ID: ${req.params.id}`);
-  res.json({ success: true, rules: routingRules });
+  res.json({ ok: true, success: true, rules: routingRules });
+});
+
+app.post('/api/routing/start', (req, res) => {
+  vpnState.isRoutingRunning = true;
+  systemLogs.push(`[ROUTING] sing-box 分流进程启动 (TUN 虚拟网卡已接管应用流量)`);
+  res.json({ ok: true, state: "RUNNING" });
+});
+
+app.post('/api/routing/stop', (req, res) => {
+  vpnState.isRoutingRunning = false;
+  systemLogs.push(`[ROUTING] sing-box 分流进程停止`);
+  res.json({ ok: true, state: "STOPPED" });
 });
 
 app.post('/api/routing/toggle', (req, res) => {
@@ -494,26 +598,23 @@ app.post('/api/routing/toggle', (req, res) => {
   res.json({ isRunning: vpnState.isRoutingRunning });
 });
 
-app.get('/api/routing/apps', (req, res) => {
-  res.json(installedApps);
+// Logs endpoints
+app.get('/api/logs', (req, res) => {
+  res.json({ logs: systemLogs.slice(-200) });
+});
+
+app.delete('/api/logs', (req, res) => {
+  systemLogs = [];
+  res.json({ ok: true });
 });
 
 app.get('/api/system/logs', (req, res) => {
   res.json(systemLogs);
 });
 
-app.get('/api/system/openvpn/status', (req, res) => {
-  res.json({
-    installed: true,
-    driverReady: vpnState.driverReady,
-    version: "OpenVPN 2.7.5"
-  });
-});
-
-app.post('/api/system/openvpn/install', (req, res) => {
-  if (isRepairing) {
-    return res.json({ status: "already_running", progress: repairProgress });
-  }
+// Repair OpenVPN endpoints
+const startRepair = () => {
+  if (isRepairing) return false;
   isRepairing = true;
   repairProgress = 5;
   systemLogs.push(`[REPAIR] 启动 Windows 虚拟网卡与 OpenVPN 驱动静默修复流程...`);
@@ -537,8 +638,32 @@ app.post('/api/system/openvpn/install', (req, res) => {
       isRepairing = false;
       vpnState.driverReady = true;
     }
-  }, 600);
+  }, 500);
 
+  return true;
+};
+
+app.post('/api/openvpn/install', (req, res) => {
+  if (vpnState.isConnected || vpnState.isRoutingRunning) {
+    return res.json({ error: "请先断开 VPN 并停止应用分流，再修复驱动" });
+  }
+  startRepair();
+  res.json({ ok: true });
+});
+
+app.get('/api/openvpn/install-status', (req, res) => {
+  res.json({
+    state: isRepairing ? "running" : (repairProgress >= 100 ? "completed" : "idle"),
+    percentage: repairProgress,
+    message: isRepairing ? `驱动修复中 (${repairProgress}%)` : (repairProgress >= 100 ? "官方驱动修复完成，网卡就绪" : "就绪")
+  });
+});
+
+app.post('/api/system/openvpn/install', (req, res) => {
+  if (isRepairing) {
+    return res.json({ status: "already_running", progress: repairProgress });
+  }
+  startRepair();
   res.json({ status: "started", progress: 5 });
 });
 
@@ -548,6 +673,19 @@ app.get('/api/system/openvpn/install/status', (req, res) => {
     progress: repairProgress,
     message: isRepairing ? `驱动修复中 (${repairProgress}%)` : (repairProgress >= 100 ? "修复完成" : "空闲")
   });
+});
+
+app.get('/api/system/openvpn/status', (req, res) => {
+  res.json({
+    installed: true,
+    driverReady: vpnState.driverReady,
+    version: "OpenVPN 2.7.5"
+  });
+});
+
+app.post('/api/system/uninstall', (req, res) => {
+  systemLogs.push(`[SYSTEM] 接收到卸载与彻底清理指令，准备清理虚拟网卡与便携目录`);
+  res.json({ ok: true });
 });
 
 app.get('/api/system/public-ip', (req, res) => {
