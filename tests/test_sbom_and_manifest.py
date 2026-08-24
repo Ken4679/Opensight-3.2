@@ -1,11 +1,18 @@
 import hashlib
 import json
+import sys
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
+sys.path.insert(0, str(ROOT_DIR / "scripts"))
+
 from opensight.core.constants import APP_VERSION, OPENVPN_MSI_SHA256, OPENVPN_VERSION, SINGBOX_VERSION
 from opensight.packaging.provenance import ArtifactProvenance, VerificationStatus
 from opensight.packaging.manifest import ManifestGenerator
-from scripts.generate_sbom import generate_cyclonedx_sbom
-from scripts.verify_manifest import verify_manifest
+from generate_sbom import generate_cyclonedx_sbom
+from verify_manifest import verify_manifest
+
 
 
 def test_sbom_generation(tmp_path: Path):
