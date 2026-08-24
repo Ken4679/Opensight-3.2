@@ -1,6 +1,6 @@
 import json
 import re
-import tomllib if hasattr(__import__("sys"), "version_info") and __import__("sys").version_info >= (3, 11) else None
+import sys
 from pathlib import Path
 from opensight.core.constants import APP_VERSION
 
