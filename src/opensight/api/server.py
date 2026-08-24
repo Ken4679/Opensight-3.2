@@ -86,112 +86,70 @@ class RecentNodesPayload(BaseModel):
 
 
 
+import secrets
+
 security_scheme = HTTPBearer(auto_error=False)
 
+def create_app(paths: PortablePaths, auth_token: str = "", allow_insecure: bool = False) -> FastAPI:
+    app = FastAPI(title="OpenSight Core API", docs_url=None, redoc_url=None)
 
-
-def create_app(paths: PortablePaths, auth_token: str = "") -> FastAPI:
-
-    app = FastAPI(title="OpenSight Core API")
-
-
+    # 生产模式下若未显式传入且未启用非安全模式，自动生成 256-bit 熵高强度 Token
+    if not auth_token and not allow_insecure:
+        auth_token = secrets.token_hex(32)
 
     app.add_middleware(
-
         CORSMiddleware,
-
-        allow_origins=["tauri://localhost", "http://localhost", "http://127.0.0.1"],
-
+        allow_origins=["tauri://localhost", "http://localhost", "http://127.0.0.1", "http://localhost:3000", "http://127.0.0.1:3000"],
         allow_credentials=True,
-
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-
-        allow_headers=["*"],
-
+        allow_headers=["Authorization", "Content-Type", "X-Requested-With", "Accept"],
     )
 
-
-
     db = DatabaseManager(paths.data_dir / "opensight.db")
-
     repo = Repository(db)
-
     rec_engine = RecommendationEngine(repo)
-
     vpn_detector = OpenVPNDetector(paths)
-
     vault = CredentialVault(paths)
-
     vpn_mgr = OpenVPNProcessManager(paths)
-
     routing_backend = SingBoxRoutingBackend(paths)
-
     settings = AppSettings.load_from_repository(repo)
 
-
-
     active_probe_engine: Optional[SafeProbeEngine] = None
-
     active_probe_loop: Optional[asyncio.AbstractEventLoop] = None
-
     probe_engine_lock = threading.Lock()
-
     _routing_lock = threading.RLock()
 
-
-
     def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme)):
-
-        if not auth_token:
-
+        if allow_insecure and not auth_token:
             return True
-
-        if not credentials or credentials.credentials != auth_token:
-
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未授权访问，Token 无效")
-
+        if not credentials or not credentials.credentials or credentials.credentials != auth_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="未授权访问: 需要有效的 Bearer Token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         return True
-
-
 
     ws_clients: List[WebSocket] = []
 
-
-
     async def broadcast_ws(event: str, data: dict):
-
         dead_clients = []
-
         for ws in ws_clients:
-
             try:
-
                 await ws.send_json({"event": event, "data": data})
-
             except Exception:
-
                 dead_clients.append(ws)
-
         for dead in dead_clients:
-
             if dead in ws_clients:
-
                 ws_clients.remove(dead)
 
-
-
     @app.websocket("/ws")
-
     async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(None)):
-
-        if auth_token and token != auth_token:
-
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-
-            return
-
+        if not allow_insecure or auth_token:
+            if not token or token != auth_token:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
         await websocket.accept()
-
         ws_clients.append(websocket)
 
         try:

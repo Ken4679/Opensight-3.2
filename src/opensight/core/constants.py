@@ -4,7 +4,7 @@ from typing import Final
 
 APP_NAME: Final[str] = "OpenSight"
 
-APP_VERSION: Final[str] = "3.1.0"
+APP_VERSION: Final[str] = "3.2.0"
 
 ORGANIZATION_NAME: Final[str] = "OpenSight"
 

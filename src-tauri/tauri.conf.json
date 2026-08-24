@@ -1,6 +1,6 @@
 {
   "productName": "OpenSight",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "identifier": "com.opensight.app",
   "build": {
     "frontendDist": "../dist-web"
@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* tauri://localhost; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
     }
   },
   "bundle": {
