@@ -54,3 +54,20 @@ def test_measure_tcp_timeout_and_network_error():
         assert latency is None
         assert error == ERR_TCP_NETWORK_ERROR
     asyncio.run(_run())
+
+def test_probe_engine_lifecycle_pause_resume_stop():
+    async def _run():
+        engine = make_engine()
+        assert not engine.is_paused
+        assert not engine.is_stopped
+
+        engine.pause()
+        assert engine.is_paused
+
+        engine.resume()
+        assert not engine.is_paused
+
+        engine.stop()
+        assert engine.is_stopped
+    asyncio.run(_run())
+
