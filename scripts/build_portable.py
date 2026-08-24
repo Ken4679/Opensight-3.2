@@ -55,19 +55,19 @@ def convert_svg_to_ico(svg_path: Path, target_ico: Path) -> bool:
 def ensure_tauri_icon(root: Path):
     icon_dir = root / 'src-tauri' / 'icons'
     icon_dir.mkdir(parents=True, exist_ok=True)
-    target_ico = icon_dir / 'icon.ico'
-    source_ico = root / 'opensight.ico'
-    source_svg = root / 'opensight.svg'
-    if source_svg.is_file() and convert_svg_to_ico(source_svg, target_ico):
-        print(f'[PASS] 已将项目真实 SVG 图标转换为 ICO: {source_svg}')
-    elif source_ico.is_file():
-        shutil.copy2(source_ico, target_ico)
-        print(f'[PASS] 使用项目真实 ICO 图标: {source_ico}')
-    else:
-        target_ico.write_bytes(create_valid_ico(create_valid_png(32, 32), 32, 32))
-        print(f'[WARN] 未找到可用的真实图标源，继续使用旧的兜底 ICO: {target_ico}')
-    shutil.copy2(target_ico, root / 'opensight.ico')
-    print(f'[PASS] Tauri 图标已就绪: {target_ico} ({target_ico.stat().st_size} 字节)')
+    try:
+        from generate_icons import generate_all_icons  # type: ignore
+        generate_all_icons(root)
+        print(f'[PASS] 已完整生成/同步多分辨率应用图标集至: {icon_dir}')
+    except Exception as e:
+        target_ico = icon_dir / 'icon.ico'
+        source_ico = root / 'opensight.ico'
+        if source_ico.is_file():
+            shutil.copy2(source_ico, target_ico)
+            print(f'[PASS] 使用项目真实 ICO 图标: {source_ico}')
+        else:
+            target_ico.write_bytes(create_valid_ico(create_valid_png(32, 32), 32, 32))
+            print(f'[WARN] 兜底生成临时 ICO: {target_ico} (err: {e})')
 
 def build():
     root = Path(__file__).resolve().parent.parent
