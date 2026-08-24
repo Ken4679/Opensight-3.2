@@ -29,25 +29,44 @@ def test_manifest_verification_pass(tmp_path: Path):
     dummy_exe.write_bytes(b"MZ_DUMMY_BINARY_DATA_FOR_TEST")
     exe_sha = hashlib.sha256(dummy_exe.read_bytes()).hexdigest().lower()
 
+    dummy_msi = tmp_path / "OpenVPN.msi"
+    dummy_msi.write_bytes(b"MSI_PACKAGE_DATA")
+    msi_sha = hashlib.sha256(dummy_msi.read_bytes()).hexdigest().lower()
+
     artifacts = [
+        # 自构建产物：expected_sha256 为 None, status 为 BUILT_ARTIFACT
         ArtifactProvenance(
             artifact_name="OpenSight.exe",
             version=APP_VERSION,
             source_url="build://OpenSight",
             source_domain="build",
-            expected_sha256=exe_sha,
+            expected_sha256=None,
             actual_sha256=exe_sha,
-            verification_status=VerificationStatus.VERIFIED,
+            verification_status=VerificationStatus.BUILT_ARTIFACT,
             file_size_bytes=dummy_exe.stat().st_size,
             local_path="OpenSight.exe",
             downloaded_at=12345678,
             opensight_owned=True,
-        )
+        ),
+        # 外部固化产物：包含预期哈希与实际哈希
+        ArtifactProvenance(
+            artifact_name="OpenVPN.msi",
+            version="2.7.5",
+            source_url="https://build.openvpn.net/OpenVPN.msi",
+            source_domain="build.openvpn.net",
+            expected_sha256=msi_sha,
+            actual_sha256=msi_sha,
+            verification_status=VerificationStatus.VERIFIED,
+            file_size_bytes=dummy_msi.stat().st_size,
+            local_path="OpenVPN.msi",
+            downloaded_at=12345678,
+            opensight_owned=False,
+        ),
     ]
 
     gen = ManifestGenerator(type("Paths", (), {"base_dir": tmp_path})())
     gen.generate_manifest(artifacts, build_commit="TEST_COMMIT")
-    gen.generate_sha256sums([dummy_exe])
+    gen.generate_sha256sums([dummy_exe, dummy_msi])
 
     assert verify_manifest(tmp_path) is True
 

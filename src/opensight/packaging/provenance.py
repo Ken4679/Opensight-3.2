@@ -6,6 +6,7 @@ class VerificationStatus(str, Enum):
     VERIFIED = "VERIFIED"
     UNVERIFIED = "UNVERIFIED"
     HASH_MISMATCH = "HASH_MISMATCH"
+    BUILT_ARTIFACT = "BUILT_ARTIFACT"
 
 @dataclass(frozen=True)
 class ArtifactProvenance:
@@ -13,7 +14,7 @@ class ArtifactProvenance:
     version: str
     source_url: str
     source_domain: str
-    expected_sha256: str
+    expected_sha256: Optional[str]
     actual_sha256: Optional[str]
     verification_status: VerificationStatus
     file_size_bytes: int
