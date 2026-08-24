@@ -44,6 +44,15 @@ When importing `.ovpn` configuration profiles:
 - Background sub-processes (`opensight-core.exe`, `openvpn.exe`, `sing-box.exe`) are bound to Windows `JobObject` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
 - When the parent UI exits or crashes, all child network routing and proxy processes are terminated by the Windows kernel.
 
+### 3.5 Release Integrity & Code Signing Policy
+- **Personal Release Integrity**: As a personal/community open-source project, OpenSight does not purchase commercial Authenticode EV/OV certificates. Code signing is **NOT REQUIRED FOR PERSONAL RELEASE**.
+- **Provenance & Verification**: Every release includes:
+  - Cryptographic SHA-256 checksums (`SHA256SUMS.txt`)
+  - Standardized CycloneDX SBOM (`SBOM.cdx.json`)
+  - Canonical provenance security manifest (`SECURITY-MANIFEST.json`)
+  - Strict pinned hash verification of bundled third-party runtimes (OpenVPN, sing-box).
+- **Windows SmartScreen**: First-time execution may trigger a standard Windows SmartScreen prompt on unsigned binaries; users can verify binary integrity against the official GitHub Release SHA256 hash.
+
 ---
 
 ## 4. Reporting a Vulnerability

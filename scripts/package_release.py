@@ -15,9 +15,10 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
 sys.path.insert(0, str(ROOT_DIR / "scripts"))
-from opensight.core.constants import APP_VERSION
+from opensight.core.constants import APP_VERSION, OPENVPN_MSI_SHA256, OPENVPN_VERSION, SINGBOX_VERSION
 from opensight.packaging.manifest import ManifestGenerator
 from opensight.packaging.provenance import ArtifactProvenance, VerificationStatus
+from generate_sbom import generate_cyclonedx_sbom
 
 REQUIRED_RUNTIMES = {
     "openvpn.exe": "openvpn/openvpn.exe",
@@ -79,25 +80,31 @@ def package_release(output_dir: Path, commit_sha: str = "LOCAL_BUILD") -> Path:
     )
 
     candidates = [
-        (exe_name, staging_dir / exe_name, "build://OpenSight", "build", APP_VERSION, True),
-        ("openvpn.exe", staging_dir / "openvpn" / "openvpn.exe", "https://build.openvpn.net/downloads/releases/OpenVPN-2.7.5-I001-amd64.msi", "build.openvpn.net", "2.7.5", False),
-        ("OpenVPN-2.7.5-I001-amd64.msi", staging_dir / "openvpn" / "OpenVPN-2.7.5-I001-amd64.msi", "https://build.openvpn.net/downloads/releases/OpenVPN-2.7.5-I001-amd64.msi", "build.openvpn.net", "2.7.5", False),
-        ("sing-box.exe", staging_dir / "singbox" / "sing-box.exe", "https://github.com/SagerNet/sing-box/releases/download/v1.13.15/sing-box-1.13.15-windows-amd64.zip", "github.com", "1.13.15", False),
+        # (name, path, url, domain, version, is_opensight_owned, pinned_expected_sha256)
+        (exe_name, staging_dir / exe_name, "build://OpenSight", "build", APP_VERSION, True, None),
+        ("openvpn.exe", staging_dir / "openvpn" / "openvpn.exe", f"https://build.openvpn.net/downloads/releases/OpenVPN-{OPENVPN_VERSION}-I001-amd64.msi", "build.openvpn.net", OPENVPN_VERSION, False, None),
+        (f"OpenVPN-{OPENVPN_VERSION}-I001-amd64.msi", staging_dir / "openvpn" / f"OpenVPN-{OPENVPN_VERSION}-I001-amd64.msi", f"https://build.openvpn.net/downloads/releases/OpenVPN-{OPENVPN_VERSION}-I001-amd64.msi", "build.openvpn.net", OPENVPN_VERSION, False, OPENVPN_MSI_SHA256),
+        ("sing-box.exe", staging_dir / "singbox" / "sing-box.exe", f"https://github.com/SagerNet/sing-box/releases/download/v{SINGBOX_VERSION}/sing-box-{SINGBOX_VERSION}-windows-amd64.zip", "github.com", SINGBOX_VERSION, False, None),
     ]
 
     artifacts = []
-    for c_name, c_path, c_url, c_domain, c_version, c_owned in candidates:
+    for c_name, c_path, c_url, c_domain, c_version, c_owned, c_expected in candidates:
         if not c_path.is_file():
             raise RuntimeError(f"发布清单缺少文件: {c_path}")
-        c_sha = hashlib.sha256(c_path.read_bytes()).hexdigest().lower()
+        c_actual = hashlib.sha256(c_path.read_bytes()).hexdigest().lower()
+        # 对于外部固化组件，必须与预设官方 hash 严格比对；自构建产物则记录构建时哈希
+        expected_sha = c_expected.lower() if c_expected else c_actual
+        if c_expected and c_actual != expected_sha:
+            raise RuntimeError(f"组件 {c_name} 哈希与官方固化基准不符: 预期 {expected_sha}, 实际 {c_actual}")
+        
         rel_path = str(c_path.relative_to(staging_dir)).replace("\\", "/")
         artifacts.append(ArtifactProvenance(
             artifact_name=c_name,
             version=c_version,
             source_url=c_url,
             source_domain=c_domain,
-            expected_sha256=c_sha,
-            actual_sha256=c_sha,
+            expected_sha256=expected_sha,
+            actual_sha256=c_actual,
             verification_status=VerificationStatus.VERIFIED,
             file_size_bytes=c_path.stat().st_size,
             local_path=rel_path,
@@ -109,6 +116,9 @@ def package_release(output_dir: Path, commit_sha: str = "LOCAL_BUILD") -> Path:
     gen.generate_manifest(artifacts, build_commit=commit_sha)
     files_to_hash = [staging_dir / a.local_path for a in artifacts]
     gen.generate_sha256sums(files_to_hash)
+
+    # 生成 CycloneDX 规范 SBOM
+    generate_cyclonedx_sbom(APP_VERSION, staging_dir / "SBOM.cdx.json")
 
     zip_path = output_dir / f"OpenSight-v{APP_VERSION}-win-x64-portable-full.zip"
     print(f"正在压缩生成最终便携 ZIP 归档: {zip_path} ...")
